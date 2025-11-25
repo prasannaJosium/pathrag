@@ -27,14 +27,14 @@ class User(UserBase):
     theme: Optional[str] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # User in DB schema
 class UserInDB(User):
     hashed_password: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Login schema
 class Login(BaseModel):
