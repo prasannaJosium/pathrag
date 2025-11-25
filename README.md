@@ -183,24 +183,12 @@ The UI will be available at:
 If you prefer to set up and run the components separately, follow these instructions:
 
 #### Backend Setup
-1. Create and activate a virtual environment:
+1. Install Python dependencies using Poetry:
    ```bash
-   # Create virtual environment
-   python -m venv .venv
-
-   # Activate on Windows
-   .venv\Scripts\activate
-
-   # Activate on macOS/Linux
-   source .venv/bin/activate
+   poetry install
    ```
 
-2. Install Python dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Configure environment variables:
+2. Configure environment variables:
    Copy the sample environment file and modify it with your settings:
    ```bash
    cp sample.env .env
@@ -251,7 +239,7 @@ If you prefer to set up and run the components separately, follow these instruct
 
 4. Start the backend server:
    ```bash
-   python main.py
+   poetry run python main.py
    ```
 
    The API will be available at http://localhost:8000

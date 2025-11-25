@@ -1,0 +1,50 @@
+[tool.poetry]
+name = "pathrag"
+version = "0.1.0"
+description = "PathRAG Project"
+authors = ["Admin <admin@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+accelerate = "*"
+aioboto3 = "*"
+aiohttp = "*"
+python-dotenv = "*"
+python-multipart = "*"
+fastapi = "*"
+uvicorn = {extras = ["standard"], version = "*"}
+websockets = "*"
+PyPDF2 = "*"
+python-docx = "*"
+docx2txt = "*"
+python-pptx = "*"
+openpyxl = "*"
+striprtf = "*"
+odfpy = "*"
+ebooklib = "*"
+beautifulsoup4 = "*"
+graspologic = "*"
+openai = "*"
+nano-vectordb = "*"
+psycopg = {extras = ["binary", "pool"], version = "*"}
+sqlalchemy = "*"
+tenacity = "*"
+networkx = "*"
+python-jose = "*"
+passlib = "*"
+bcrypt = "*"
+pyjwt = "*"
+aiosqlite = "*"
+matplotlib = "*"
+tiktoken = "*"
+torch = "*"
+transformers = "*"
+xxhash = "*"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

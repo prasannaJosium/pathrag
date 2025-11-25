@@ -12,21 +12,9 @@ This guide provides detailed instructions for setting up the PathRAG application
    cd pathrag
    ```
 
-2. **Create a virtual environment**
+2. **Install dependencies**
    ```bash
-   # Using venv
-   python -m venv .venv
-
-   # Activate on Windows
-   .venv\Scripts\activate
-
-   # Activate on macOS/Linux
-   source .venv/bin/activate
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
+   poetry install
    ```
 
 4. **Set up environment variables**
@@ -89,16 +77,16 @@ This guide provides detailed instructions for setting up the PathRAG application
    **Option 2: Using the main.py script**
    ```bash
    # Basic start with default settings
-   python main.py
+   poetry run python main.py
 
    # With environment variables override
-   HOST=127.0.0.1 PORT=8080 DEBUG=true python main.py
+   HOST=127.0.0.1 PORT=8080 DEBUG=true poetry run python main.py
    ```
 
    **Option 3: Using uvicorn directly**
    ```bash
    # Basic start
-   uvicorn main:app --host 0.0.0.0 --port 8000
+   poetry run uvicorn main:app --host 0.0.0.0 --port 8000
 
    # With reload for development (auto-restart on file changes)
    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
@@ -160,12 +148,8 @@ This guide provides detailed instructions for setting up the PathRAG application
    git clone <repository-url>
    cd pathrag
 
-   # Create a virtual environment
-   python -m venv .venv
-   source .venv/bin/activate
-
    # Install dependencies
-   pip install -r requirements.txt
+   poetry install --without dev
    ```
 
 3. **Set up environment variables**
@@ -384,9 +368,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8000
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Poetry and dependencies
+RUN pip install poetry
+COPY pyproject.toml poetry.lock* ./
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-interaction --no-ansi
 
 # Copy application code
 COPY . .
@@ -415,8 +401,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements.txt .
-RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
+RUN pip install poetry
+COPY pyproject.toml poetry.lock* ./
+RUN poetry export -f requirements.txt --output requirements.txt --without-hashes \
+    && pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
 
 # Final stage
 FROM python:3.9-slim
