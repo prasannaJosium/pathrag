@@ -4,10 +4,6 @@ from api.features.rag_manager import get_rag_instance
 from models.database import User
 from api.auth.jwt_handler import get_current_active_user
 from .schemas import Graph, GraphQuery, Node, Edge
-from PathRAG import PathRAG
-
-# Initialize PathRAG
-rag = PathRAG(working_dir="./data")
 
 router = APIRouter(
     prefix="/knowledge-graph",

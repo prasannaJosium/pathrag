@@ -4,8 +4,7 @@ PathRAG Manager - Centralized management of PathRAG instances
 
 import os
 import logging
-from PathRAG import PathRAG
-from PathRAG.llm import azure_openai_complete
+from PathRAG import PathRAG, PathRAGConfig
 
 logger = logging.getLogger("PathRAG")
 
@@ -25,10 +24,8 @@ def get_rag_instance():
     
     if _rag_instance is None:
         logger.info("Initializing PathRAG instance...")
-        _rag_instance = PathRAG(
-            working_dir=WORKING_DIR,
-            llm_model_func=azure_openai_complete,
-        )
+        config = PathRAGConfig(working_dir=WORKING_DIR)
+        _rag_instance = PathRAG(config=config)
         logger.info("PathRAG instance initialized successfully")
     
     return _rag_instance
@@ -42,10 +39,8 @@ def reload_rag_instance():
     logger.info("Reloading PathRAG instance...")
     
     # Create a new instance
-    _rag_instance = PathRAG(
-        working_dir=WORKING_DIR,
-        llm_model_func=azure_openai_complete,
-    )
+    config = PathRAGConfig(working_dir=WORKING_DIR)
+    _rag_instance = PathRAG(config=config)
     
     logger.info("PathRAG instance reloaded successfully")
     return _rag_instance

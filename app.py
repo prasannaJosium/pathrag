@@ -3,8 +3,8 @@ import tempfile
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
-from PathRAG import PathRAG, QueryParam
-from PathRAG.llm import azure_openai_complete, azure_openai_complete_stream
+from PathRAG import PathRAG, QueryParam, PathRAGConfig
+
 # Additional libraries for file processing
 import PyPDF2
 import docx2txt
@@ -20,22 +20,21 @@ from bs4 import BeautifulSoup
 app = FastAPI(
     title="PathRAG API",
     description="API for uploading files and querying the RAG system (including streaming responses).",
-    version="1.0"
+    version="1.0",
 )
 
 # Load environment variables from .env.
 load_dotenv()
 
 # Setup a working directory for PathRAG.
-WORKING_DIR = os.path.join(os.getcwd(), 'data')
+WORKING_DIR = os.path.join(os.getcwd(), "data")
 if not os.path.exists(WORKING_DIR):
     os.mkdir(WORKING_DIR)
 
 # Initialize the RAG instance.
-rag = PathRAG(
-    working_dir=WORKING_DIR,
-    llm_model_func=azure_openai_complete,
-)
+config = PathRAGConfig(working_dir=WORKING_DIR)
+rag = PathRAG(config=config)
+
 
 def extract_text_from_file(file: UploadFile) -> str:
     """
@@ -52,17 +51,43 @@ def extract_text_from_file(file: UploadFile) -> str:
 
     # Define plain text file extensions.
     plain_text_ext = [
-        ".txt", ".md", ".tex", ".csv", ".json", ".xml", ".yaml", ".yml",
-        ".log", ".conf", ".ini", ".properties", ".sql", ".bat", ".sh",
-        ".c", ".cpp", ".py", ".java", ".js", ".ts", ".swift", ".go",
-        ".rb", ".php", ".css", ".scss", ".less"
+        ".txt",
+        ".md",
+        ".tex",
+        ".csv",
+        ".json",
+        ".xml",
+        ".yaml",
+        ".yml",
+        ".log",
+        ".conf",
+        ".ini",
+        ".properties",
+        ".sql",
+        ".bat",
+        ".sh",
+        ".c",
+        ".cpp",
+        ".py",
+        ".java",
+        ".js",
+        ".ts",
+        ".swift",
+        ".go",
+        ".rb",
+        ".php",
+        ".css",
+        ".scss",
+        ".less",
     ]
 
     if extension in plain_text_ext:
         try:
-            return file.file.read().decode('utf-8', errors='ignore')
+            return file.file.read().decode("utf-8", errors="ignore")
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error reading {extension} file: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Error reading {extension} file: {str(e)}"
+            )
     elif extension == ".pdf":
         try:
             file.file.seek(0)
@@ -72,7 +97,9 @@ def extract_text_from_file(file: UploadFile) -> str:
                 text += page.extract_text() or ""
             return text
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error processing PDF file: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Error processing PDF file: {str(e)}"
+            )
     elif extension == ".docx":
         try:
             file.file.seek(0)
@@ -83,7 +110,9 @@ def extract_text_from_file(file: UploadFile) -> str:
             os.remove(tmp_path)
             return text
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error processing DOCX file: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Error processing DOCX file: {str(e)}"
+            )
     elif extension == ".pptx":
         try:
             file.file.seek(0)
@@ -99,7 +128,9 @@ def extract_text_from_file(file: UploadFile) -> str:
             os.remove(tmp_path)
             return text
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error processing PPTX file: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Error processing PPTX file: {str(e)}"
+            )
     elif extension == ".xlsx":
         try:
             file.file.seek(0)
@@ -115,14 +146,18 @@ def extract_text_from_file(file: UploadFile) -> str:
             os.remove(tmp_path)
             return text
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error processing XLSX file: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Error processing XLSX file: {str(e)}"
+            )
     elif extension == ".rtf":
         try:
             file.file.seek(0)
-            content = file.file.read().decode('utf-8', errors='ignore')
+            content = file.file.read().decode("utf-8", errors="ignore")
             return rtf_to_text(content)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error processing RTF file: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Error processing RTF file: {str(e)}"
+            )
     elif extension == ".odt":
         try:
             file.file.seek(0)
@@ -134,7 +169,9 @@ def extract_text_from_file(file: UploadFile) -> str:
             os.remove(tmp_path)
             return text_content
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error processing ODT file: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Error processing ODT file: {str(e)}"
+            )
     elif extension == ".epub":
         try:
             file.file.seek(0)
@@ -150,19 +187,28 @@ def extract_text_from_file(file: UploadFile) -> str:
             os.remove(tmp_path)
             return text
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error processing EPUB file: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Error processing EPUB file: {str(e)}"
+            )
     elif extension in [".html", ".htm"]:
         try:
             file.file.seek(0)
-            content = file.file.read().decode('utf-8', errors='ignore')
+            content = file.file.read().decode("utf-8", errors="ignore")
             soup = BeautifulSoup(content, "html.parser")
             return soup.get_text()
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error processing HTML file: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Error processing HTML file: {str(e)}"
+            )
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type.")
 
-@app.post("/upload", summary="Upload a file", description="Upload a file to insert its content into the RAG system.")
+
+@app.post(
+    "/upload",
+    summary="Upload a file",
+    description="Upload a file to insert its content into the RAG system.",
+)
 async def upload_file(file: UploadFile = File(...)):
     try:
         content = extract_text_from_file(file)
@@ -171,7 +217,12 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/query", summary="Query the RAG system", description="Send a query to the RAG system and receive the generated response.")
+
+@app.post(
+    "/query",
+    summary="Query the RAG system",
+    description="Send a query to the RAG system and receive the generated response.",
+)
 async def query_rag(query: str):
     try:
         result = await rag.aquery(query, param=QueryParam(mode="hybrid"))
@@ -179,15 +230,18 @@ async def query_rag(query: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/query_stream", summary="Stream Query the RAG system", description="Send a query to the RAG system and stream the generated response.")
+
+@app.post(
+    "/query_stream",
+    summary="Stream Query the RAG system",
+    description="Send a query to the RAG system and stream the generated response.",
+)
 async def query_rag_stream(query: str):
     async def stream_generator():
-        async for chunk in azure_openai_complete_stream(
-            query,
-            system_prompt=None,
-            history_messages=[],
-            keyword_extraction=False,
-            param=QueryParam(mode="hybrid")
-        ):
+        response_generator = await rag.aquery(
+            query, param=QueryParam(mode="hybrid", stream=True)
+        )
+        async for chunk in response_generator:
             yield chunk
+
     return StreamingResponse(stream_generator(), media_type="text/plain")
