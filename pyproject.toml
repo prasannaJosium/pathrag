@@ -1,0 +1,58 @@
+[tool.poetry]
+name = "pathrag"
+version = "0.1.0"
+description = "PathRAG Project"
+authors = ["Admin <admin@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.13"
+accelerate = "1.12.0"
+aioboto3 = "15.5.0"
+aiohttp = "3.13.2"
+python-dotenv = "1.2.1"
+python-multipart = "0.0.20"
+fastapi = "0.122.0"
+uvicorn = {extras = ["standard"], version = "0.38.0"}
+websockets = "15.0.1"
+PyPDF2 = "3.0.1"
+python-docx = "1.2.0"
+docx2txt = "0.9"
+python-pptx = "1.0.2"
+openpyxl = "3.1.5"
+striprtf = "0.0.29"
+odfpy = "1.4.1"
+ebooklib = "0.20"
+beautifulsoup4 = "4.14.2"
+graspologic = "3.4.1"
+openai = "^1.55.0"
+nano-vectordb = "0.0.4.3"
+psycopg = {extras = ["binary", "pool"], version = "3.2.13"}
+sqlalchemy = "2.0.44"
+tenacity = "^8.1.0"
+networkx = "3.6"
+python-jose = "3.5.0"
+bcrypt = "4.2.0"
+pyjwt = "2.10.1"
+aiosqlite = "0.21.0"
+matplotlib = "3.10.7"
+tiktoken = "0.12.0"
+torch = "2.7.1"
+transformers = "4.57.2"
+xxhash = "3.6.0"
+# Pin referencing to avoid 'python_full_version' marker issue in older poetry versions
+referencing = "<0.32.0"
+# Pin Gensim to > 4.0 to avoid old Cython dependency in Python 3.12
+gensim = "4.3.3"
+pydantic = {extras = ["email"], version = "^2.12.4"}
+langchain = "^0.2.0"
+langchain-core = "^0.2.0"
+langchain-openai = "^0.1.8"
+langchain-google-genai = "^1.0.7"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "9.0.1"
+
+[build-system]
+requires = ["poetry-core>=1.0.0", "cython>=3.0.0"]
+build-backend = "poetry.core.masonry.api"

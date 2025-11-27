@@ -10,13 +10,13 @@ class UserProfile(BaseModel):
     theme: Optional[str] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserList(BaseModel):
     users: List[UserProfile]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class ThemeUpdate(BaseModel):
     theme: str

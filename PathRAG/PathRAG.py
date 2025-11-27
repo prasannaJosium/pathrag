@@ -1,16 +1,20 @@
 import asyncio
 import os
 from tqdm.asyncio import tqdm as tqdm_async
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
 from typing import Type, cast
+import numpy as np
 
-
-from .llm import (
-    azure_openai_complete,
-    azure_openai_embedding,
+from .config import PathRAGConfig
+from .llm_langchain import (
+    get_langchain_llm,
+    get_langchain_embeddings,
+    langchain_llm_complete,
+    langchain_embedding,
 )
+
 from .operate import (
     chunking_by_token_size,
     extract_entities,
@@ -18,12 +22,12 @@ from .operate import (
 )
 
 from .utils import (
-    EmbeddingFunc,
     compute_mdhash_id,
     limit_async_func_call,
     convert_response_to_json,
     logger,
     set_logger,
+    wrap_embedding_func_with_attrs,
 )
 from .base import (
     BaseGraphStorage,
@@ -40,11 +44,8 @@ from .storage import (
 )
 
 
-
-
 def lazy_external_import(module_name: str, class_name: str):
     """Lazily import a class from an external module based on the package of the caller."""
-
 
     import inspect
 
@@ -55,9 +56,7 @@ def lazy_external_import(module_name: str, class_name: str):
     def import_class(*args, **kwargs):
         import importlib
 
-  
         module = importlib.import_module(module_name, package=package)
-
 
         cls = getattr(module, class_name)
         return cls(*args, **kwargs)
@@ -88,14 +87,12 @@ def always_get_an_event_loop() -> asyncio.AbstractEventLoop:
         asyncio.AbstractEventLoop: The current or newly created event loop.
     """
     try:
-
         current_loop = asyncio.get_event_loop()
         if current_loop.is_closed():
             raise RuntimeError("Event loop is closed.")
         return current_loop
 
     except RuntimeError:
-
         logger.info("Creating a new event loop in main thread.")
         new_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(new_loop)
@@ -104,174 +101,169 @@ def always_get_an_event_loop() -> asyncio.AbstractEventLoop:
 
 @dataclass
 class PathRAG:
-    working_dir: str = field(
-        default_factory=lambda: f"./PathRAG_cache_{datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}"
-    )
-
-    embedding_cache_config: dict = field(
-        default_factory=lambda: {
-            "enabled": False,
-            "similarity_threshold": 0.95,
-            "use_llm_check": False,
-        }
-    )
-    kv_storage: str = field(default="JsonKVStorage")
-    vector_storage: str = field(default="NanoVectorDBStorage")
-    graph_storage: str = field(default="NetworkXStorage")
-
-    current_log_level = logger.level
-    log_level: str = field(default=current_log_level)
-
-
-    chunk_token_size: int = 1200
-    chunk_overlap_token_size: int = 100
-    tiktoken_model_name: str = "gpt-4o-mini"
-
-
-    entity_extract_max_gleaning: int = 1
-    entity_summary_to_max_tokens: int = 500
-
-
-    node_embedding_algorithm: str = "node2vec"
-    node2vec_params: dict = field(
-        default_factory=lambda: {
-            "dimensions": 1536,
-            "num_walks": 10,
-            "walk_length": 40,
-            "window_size": 2,
-            "iterations": 3,
-            "random_seed": 3,
-        }
-    )
-
-
-    embedding_func: EmbeddingFunc = field(default_factory=lambda: azure_openai_embedding)
-    embedding_batch_num: int = 32
-    embedding_func_max_async: int = 16
-
-
-    llm_model_func: callable = azure_openai_complete  
-    llm_model_name: str = "gpt-4o"  
-    llm_model_max_token_size: int = 32768
-    llm_model_max_async: int = 16
-    llm_model_kwargs: dict = field(default_factory=dict)
-
-
-    vector_db_storage_cls_kwargs: dict = field(default_factory=dict)
-
-    enable_llm_cache: bool = True
-
-
-    addon_params: dict = field(default_factory=dict)
-    convert_response_to_json_func: callable = convert_response_to_json
+    config: PathRAGConfig = field(default_factory=PathRAGConfig)
 
     def __post_init__(self):
+        # Setup working directory default if not customized but default value
+        if self.config.working_dir == "./PathRAG_cache":
+            self.config.working_dir = (
+                f"./PathRAG_cache_{datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}"
+            )
+
         log_file = os.path.join("PathRAG.log")
         set_logger(log_file)
-        logger.setLevel(self.log_level)
+        logger.setLevel(self.config.log_level)
 
-        logger.info(f"Logger initialized for working directory: {self.working_dir}")
-
+        logger.info(
+            f"Logger initialized for working directory: {self.config.working_dir}"
+        )
 
         self.key_string_value_json_storage_cls: Type[BaseKVStorage] = (
-            self._get_storage_class()[self.kv_storage]
+            self._get_storage_class()[self.config.kv_storage]
         )
         self.vector_db_storage_cls: Type[BaseVectorStorage] = self._get_storage_class()[
-            self.vector_storage
+            self.config.vector_storage
         ]
         self.graph_storage_cls: Type[BaseGraphStorage] = self._get_storage_class()[
-            self.graph_storage
+            self.config.graph_storage
         ]
 
-        if not os.path.exists(self.working_dir):
-            logger.info(f"Creating working directory {self.working_dir}")
-            os.makedirs(self.working_dir)
+        if not os.path.exists(self.config.working_dir):
+            logger.info(f"Creating working directory {self.config.working_dir}")
+            os.makedirs(self.config.working_dir)
+
+        # Initialize LangChain Models
+        self.llm = get_langchain_llm(self.config.llm)
+        self.embeddings = get_langchain_embeddings(self.config.embedding)
+
+        # Create wrappers
+        async def _embedding_func_wrapper(texts: list[str]) -> np.ndarray:
+            return await langchain_embedding(self.embeddings, texts)
+
+        wrapper = wrap_embedding_func_with_attrs(
+            embedding_dim=self.config.node2vec_params.get("dimensions", 1536),
+            max_token_size=8191,
+        )
+        self.embedding_func = wrapper(_embedding_func_wrapper)
+
+        self.llm_model_func = partial(langchain_llm_complete, self.llm)
+
+        # Initial global config for response cache (before wrapping/limiting functions)
+        global_config_clean = self.to_global_config()
 
         self.llm_response_cache = (
             self.key_string_value_json_storage_cls(
                 namespace="llm_response_cache",
-                global_config=asdict(self),
+                global_config=global_config_clean,
                 embedding_func=None,
             )
-            if self.enable_llm_cache
+            if self.config.enable_llm_cache
             else None
         )
-        self.embedding_func = limit_async_func_call(self.embedding_func_max_async)(
-            self.embedding_func
-        )
 
+        self.embedding_func = limit_async_func_call(
+            self.config.embedding_func_max_async
+        )(self.embedding_func)
 
         self.full_docs = self.key_string_value_json_storage_cls(
             namespace="full_docs",
-            global_config=asdict(self),
+            global_config=global_config_clean,
             embedding_func=self.embedding_func,
         )
         self.text_chunks = self.key_string_value_json_storage_cls(
             namespace="text_chunks",
-            global_config=asdict(self),
+            global_config=global_config_clean,
             embedding_func=self.embedding_func,
         )
         self.chunk_entity_relation_graph = self.graph_storage_cls(
             namespace="chunk_entity_relation",
-            global_config=asdict(self),
+            global_config=global_config_clean,
             embedding_func=self.embedding_func,
         )
 
-
         self.entities_vdb = self.vector_db_storage_cls(
             namespace="entities",
-            global_config=asdict(self),
+            global_config=global_config_clean,
             embedding_func=self.embedding_func,
             meta_fields={"entity_name"},
         )
         self.relationships_vdb = self.vector_db_storage_cls(
             namespace="relationships",
-            global_config=asdict(self),
+            global_config=global_config_clean,
             embedding_func=self.embedding_func,
             meta_fields={"src_id", "tgt_id"},
         )
         self.chunks_vdb = self.vector_db_storage_cls(
             namespace="chunks",
-            global_config=asdict(self),
+            global_config=global_config_clean,
             embedding_func=self.embedding_func,
         )
 
-        self.llm_model_func = limit_async_func_call(self.llm_model_max_async)(
+        self.llm_model_func = limit_async_func_call(self.config.llm_model_max_async)(
             partial(
                 self.llm_model_func,
                 hashing_kv=self.llm_response_cache
                 if self.llm_response_cache
                 and hasattr(self.llm_response_cache, "global_config")
                 else self.key_string_value_json_storage_cls(
-                    global_config=asdict(self),
+                    global_config=global_config_clean,
                 ),
-                **self.llm_model_kwargs,
+                **self.config.llm.extra_kwargs,
             )
         )
 
+        # We must ensure that when to_global_config is called later (e.g. in query),
+        # it returns the wrapped llm_model_func.
+        # Since to_global_config access self.llm_model_func dynamically, it will work.
+
+    def to_global_config(self) -> dict:
+        """Reconstructs the global configuration dictionary expected by storage and operation modules."""
+        return {
+            "working_dir": self.config.working_dir,
+            "embedding_cache_config": self.config.embedding_cache_config,
+            "kv_storage": self.config.kv_storage,
+            "vector_storage": self.config.vector_storage,
+            "graph_storage": self.config.graph_storage,
+            "log_level": self.config.log_level,
+            "chunk_token_size": self.config.chunk_token_size,
+            "chunk_overlap_token_size": self.config.chunk_overlap_token_size,
+            "tiktoken_model_name": self.config.tiktoken_model_name,
+            "entity_extract_max_gleaning": self.config.entity_extract_max_gleaning,
+            "entity_summary_to_max_tokens": self.config.entity_summary_to_max_tokens,
+            "node_embedding_algorithm": self.config.node_embedding_algorithm,
+            "node2vec_params": self.config.node2vec_params,
+            "embedding_func": self.embedding_func,
+            "embedding_batch_num": self.config.embedding_batch_num,
+            "embedding_func_max_async": self.config.embedding_func_max_async,
+            "llm_model_func": self.llm_model_func,
+            "llm_model_name": self.config.llm.model,
+            "llm_model_max_token_size": self.config.llm_model_max_token_size,
+            "llm_model_max_async": self.config.llm_model_max_async,
+            "llm_model_kwargs": self.config.llm.extra_kwargs,
+            "vector_db_storage_cls_kwargs": self.config.vector_db_storage_cls_kwargs,
+            "enable_llm_cache": self.config.enable_llm_cache,
+            "addon_params": self.config.addon_params,
+            "convert_response_to_json_func": convert_response_to_json,
+        }
+
     def _get_storage_class(self) -> Type[BaseGraphStorage]:
         return {
-
             "JsonKVStorage": JsonKVStorage,
             "OracleKVStorage": OracleKVStorage,
             "MongoKVStorage": MongoKVStorage,
             "TiDBKVStorage": TiDBKVStorage,
-
             "NanoVectorDBStorage": NanoVectorDBStorage,
             "OracleVectorDBStorage": OracleVectorDBStorage,
             "MilvusVectorDBStorge": MilvusVectorDBStorge,
             "ChromaVectorDBStorage": ChromaVectorDBStorage,
             "TiDBVectorDBStorage": TiDBVectorDBStorage,
-
             "NetworkXStorage": NetworkXStorage,
             "Neo4JStorage": Neo4JStorage,
             "OracleGraphStorage": OracleGraphStorage,
             "AGEStorage": AGEStorage,
-
         }
 
     async def insert(self, string_or_strings):
-        
         loop = always_get_an_event_loop()
         return await loop.run_until_complete(await self.ainsert(string_or_strings))
 
@@ -304,9 +296,9 @@ class PathRAG:
                     }
                     for dp in chunking_by_token_size(
                         doc["content"],
-                        overlap_token_size=self.chunk_overlap_token_size,
-                        max_token_size=self.chunk_token_size,
-                        tiktoken_model=self.tiktoken_model_name,
+                        overlap_token_size=self.config.chunk_overlap_token_size,
+                        max_token_size=self.config.chunk_token_size,
+                        tiktoken_model=self.config.tiktoken_model_name,
                     )
                 }
                 inserting_chunks.update(chunks)
@@ -329,7 +321,7 @@ class PathRAG:
                 knowledge_graph_inst=self.chunk_entity_relation_graph,
                 entity_vdb=self.entities_vdb,
                 relationships_vdb=self.relationships_vdb,
-                global_config=asdict(self),
+                global_config=self.to_global_config(),
             )
             if maybe_new_kg is None:
                 logger.warning("No new entities and relationships found")
@@ -365,7 +357,6 @@ class PathRAG:
     async def ainsert_custom_kg(self, custom_kg: dict):
         update_storage = False
         try:
-
             all_chunks_data = {}
             chunk_to_source_map = {}
             for chunk_data in custom_kg.get("chunks", []):
@@ -383,7 +374,6 @@ class PathRAG:
             if self.text_chunks is not None and all_chunks_data:
                 await self.text_chunks.upsert(all_chunks_data)
 
- 
             all_entities_data = []
             for entity_data in custom_kg.get("entities", []):
                 entity_name = f'"{entity_data["entity_name"].upper()}"'
@@ -393,12 +383,10 @@ class PathRAG:
                 source_chunk_id = entity_data.get("source_id", "UNKNOWN")
                 source_id = chunk_to_source_map.get(source_chunk_id, "UNKNOWN")
 
-
                 if source_id == "UNKNOWN":
                     logger.warning(
                         f"Entity '{entity_name}' has an UNKNOWN source_id. Please check the source mapping."
                     )
-
 
                 node_data = {
                     "entity_type": entity_type,
@@ -413,7 +401,6 @@ class PathRAG:
                 all_entities_data.append(node_data)
                 update_storage = True
 
-
             all_relationships_data = []
             for relationship_data in custom_kg.get("relationships", []):
                 src_id = f'"{relationship_data["src_id"].upper()}"'
@@ -425,12 +412,10 @@ class PathRAG:
                 source_chunk_id = relationship_data.get("source_id", "UNKNOWN")
                 source_id = chunk_to_source_map.get(source_chunk_id, "UNKNOWN")
 
-
                 if source_id == "UNKNOWN":
                     logger.warning(
                         f"Relationship from '{src_id}' to '{tgt_id}' has an UNKNOWN source_id. Please check the source mapping."
                     )
-
 
                 for need_insert_id in [src_id, tgt_id]:
                     if not (
@@ -444,7 +429,6 @@ class PathRAG:
                                 "entity_type": "UNKNOWN",
                             },
                         )
-
 
                 await self.chunk_entity_relation_graph.upsert_edge(
                     src_id,
@@ -465,7 +449,6 @@ class PathRAG:
                 all_relationships_data.append(edge_data)
                 update_storage = True
 
-
             if self.entities_vdb is not None:
                 data_for_vdb = {
                     compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
@@ -475,7 +458,6 @@ class PathRAG:
                     for dp in all_entities_data
                 }
                 await self.entities_vdb.upsert(data_for_vdb)
-
 
             if self.relationships_vdb is not None:
                 data_for_vdb = {
@@ -493,26 +475,26 @@ class PathRAG:
         finally:
             if update_storage:
                 await self._insert_done()
-    
+
     async def query(self, query: str, param: QueryParam = QueryParam()):
         loop = always_get_an_event_loop()
         return await loop.run_until_complete(await self.aquery(query, param))
-    
+
     async def aquery(self, query: str, param: QueryParam = QueryParam()):
         if param.mode in ["hybrid"]:
-            response= await kg_query(
+            response = await kg_query(
                 query,
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
                 self.relationships_vdb,
                 self.text_chunks,
                 param,
-                asdict(self),
+                self.to_global_config(),
                 hashing_kv=self.llm_response_cache
                 if self.llm_response_cache
                 and hasattr(self.llm_response_cache, "global_config")
                 else self.key_string_value_json_storage_cls(
-                    global_config=asdict(self),
+                    global_config=self.to_global_config(),
                 ),
             )
             print("response all ready")
@@ -521,7 +503,6 @@ class PathRAG:
         await self._query_done()
         return response
 
-        
     async def _query_done(self):
         tasks = []
         for storage_inst in [self.llm_response_cache]:
