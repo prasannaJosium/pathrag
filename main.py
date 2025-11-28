@@ -47,8 +47,7 @@ def create_default_users():
             # Create 3 default users
             default_users = [
                 {"username": "user1", "email": "user1@example.com", "password": "Pass@123"},
-                {"username": "user2", "email": "user2@example.com", "password": "Pass@123"},
-                {"username": "user3", "email": "user3@example.com", "password": "Pass@123"}
+
             ]
 
             for user_data in default_users:

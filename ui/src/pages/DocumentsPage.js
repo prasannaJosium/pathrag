@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Button, Modal, Message } from 'rsuite';
+import React, { useState, useEffect, useRef } from 'react';
+import { Button, Modal, Message, toaster } from 'rsuite';
 import Layout from '../components/Layout';
 import DocumentList from '../components/documents/DocumentList';
 import DocumentUploader from '../components/documents/DocumentUploader';
@@ -12,6 +12,7 @@ const DocumentsPage = () => {
   const [reloading, setReloading] = useState(false);
   const [error, setError] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const uploaderRef = useRef(null);
 
   // Fetch documents
   const fetchDocuments = async () => {
@@ -46,13 +47,45 @@ const DocumentsPage = () => {
       setReloading(true);
       const response = await documentAPI.reloadDocuments();
       if (response && response.data && response.data.success) {
-        Message.success(response.data.message || 'Documents reloaded successfully');
+        toaster.push(
+          <Message type="success">
+            {response.data.message || 'Documents reloaded successfully'}
+          </Message>,
+          { placement: 'topCenter', duration: 3000 }
+        );
       }
     } catch (error) {
       console.error('Error reloading documents:', error);
-      Message.error('Failed to reload documents. Please try again.');
+      toaster.push(
+        <Message type="error">
+          Failed to reload documents. Please try again.
+        </Message>,
+        { placement: 'topCenter', duration: 3000 }
+      );
     } finally {
       setReloading(false);
+    }
+  };
+
+  // Handle delete document
+  const handleDeleteDocument = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this document? This will remove all related graph data.')) {
+      return;
+    }
+
+    try {
+      await documentAPI.deleteDocument(id);
+      setDocuments(documents.filter(doc => doc.id !== id));
+      toaster.push(
+        <Message type="success">Document deleted successfully</Message>,
+        { placement: 'topCenter', duration: 3000 }
+      );
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      toaster.push(
+        <Message type="error">Failed to delete document</Message>,
+        { placement: 'topCenter', duration: 3000 }
+      );
     }
   };
 
@@ -77,7 +110,7 @@ const DocumentsPage = () => {
 
       {error && <Message type="error">{error}</Message>}
 
-      <DocumentList documents={documents} loading={loading} />
+      <DocumentList documents={documents} loading={loading} onDelete={handleDeleteDocument} />
 
       <Modal
         open={showUploadModal}
@@ -89,10 +122,13 @@ const DocumentsPage = () => {
         </Modal.Header>
 
         <Modal.Body>
-          <DocumentUploader onUploadComplete={handleUploadComplete} />
+          <DocumentUploader ref={uploaderRef} onUploadComplete={handleUploadComplete} />
         </Modal.Body>
 
         <Modal.Footer>
+          <Button onClick={() => uploaderRef.current?.open()} appearance="primary" style={{ marginRight: '10px' }}>
+            Browse Files
+          </Button>
           <Button onClick={() => setShowUploadModal(false)} appearance="subtle">
             Cancel
           </Button>

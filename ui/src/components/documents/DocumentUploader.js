@@ -1,9 +1,9 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Panel, Loader, Progress, Message, Button, Notification, toaster } from 'rsuite';
 import { documentAPI } from '../../services/api';
 
-const DocumentUploader = ({ onUploadComplete }) => {
+const DocumentUploader = forwardRef(({ onUploadComplete }, ref) => {
   const [uploading, setUploading] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [uploadProgress, setUploadProgress] = useState(0); // Used in the onUploadProgress callback
@@ -201,7 +201,7 @@ const DocumentUploader = ({ onUploadComplete }) => {
     }
   }, [startStatusPolling, onUploadComplete]);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
     accept: {
       'application/pdf': ['.pdf'],
@@ -213,6 +213,10 @@ const DocumentUploader = ({ onUploadComplete }) => {
     disabled: uploading,
     multiple: false,
   });
+
+  useImperativeHandle(ref, () => ({
+    open
+  }));
 
   // Determine status color based on current status
   const getStatusColor = () => {
@@ -286,6 +290,6 @@ const DocumentUploader = ({ onUploadComplete }) => {
       )}
     </Panel>
   );
-};
+});
 
 export default DocumentUploader;

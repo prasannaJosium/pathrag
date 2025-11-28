@@ -11,6 +11,8 @@ from models.database import get_db, Document, User
 from api.auth.jwt_handler import get_current_active_user
 from .schemas import DocumentResponse, DocumentList
 from api.features.rag_manager import get_rag_instance, reload_rag_instance
+from PathRAG.utils import compute_mdhash_id
+
 # Additional libraries for file processing
 import PyPDF2
 import docx2txt
@@ -297,6 +299,60 @@ async def get_document_status(document_id: int, db: Session = Depends(get_db), c
     # Return the document with its current status
     return document
 
+@router.delete("/{document_id}", summary="Delete a document", description="Delete a document and its associated graph elements.")
+async def delete_document(
+    document_id: int, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_active_user)
+):
+    global rag
+    
+    # Check if document exists and belongs to user
+    document = db.query(Document).filter(Document.id == document_id, Document.user_id == current_user.id).first()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Delete from RAG
+    try:
+        # Read content to compute ID
+        if os.path.exists(document.file_path):
+             # Re-open file
+             with open(document.file_path, "rb") as f:
+                  # Create temp file object similar to upload_file logic
+                   class TempUploadFile:
+                        def __init__(self, file_path):
+                            self.filename = os.path.basename(file_path)
+                            self.file = open(file_path, "rb")
+                   
+                   temp_file = TempUploadFile(document.file_path)
+                   content = extract_text_from_file(temp_file)
+                   temp_file.file.close()
+             
+             doc_hash_id = compute_mdhash_id(content.strip(), prefix="doc-")
+             await rag.adelete_document(doc_hash_id)
+             
+             # Also remove file from disk
+             try:
+                 os.remove(document.file_path)
+             except Exception as e:
+                 logger.warning(f"Failed to delete file from disk: {e}")
+        else:
+            logger.warning(f"File {document.file_path} not found on disk.")
+            # Still try to delete from RAG if we could compute hash? 
+            # Without content, we can't compute hash. So we can't delete from RAG if file is missing.
+            # But maybe we should delete from DB anyway.
+            pass
+
+        # Remove from DB
+        db.delete(document)
+        db.commit()
+        
+        return {"message": "Document deleted successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error deleting document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/reload", response_model=dict)
 async def reload_documents(current_user: User = Depends(get_current_active_user)):
     """
@@ -323,4 +379,3 @@ async def reload_documents(current_user: User = Depends(get_current_active_user)
             status_code=500,
             detail=f"Failed to reload PathRAG instance: {str(e)}"
         )
-

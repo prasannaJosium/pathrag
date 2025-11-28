@@ -59,6 +59,11 @@ class JsonKVStorage(BaseKVStorage):
         self._data.update(left_data)
         return left_data
 
+    async def delete(self, ids: list[str]):
+        for id in ids:
+            if id in self._data:
+                del self._data[id]
+
     async def drop(self):
         self._data = {}
 
@@ -119,6 +124,11 @@ class NanoVectorDBStorage(BaseVectorStorage):
             logger.error(
                 f"embedding is not 1-1 with data, {len(embeddings)} != {len(list_data)}"
             )
+
+    async def delete(self, ids: list[str]):
+        if ids:
+            self._client.delete(ids)
+            logger.info(f"Deleted {len(ids)} vectors from {self.namespace}")
 
     async def query(self, query: str, top_k=5):
         embedding = await self.embedding_func([query])

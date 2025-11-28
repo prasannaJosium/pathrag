@@ -19,6 +19,7 @@ from .operate import (
     chunking_by_token_size,
     extract_entities,
     kg_query,
+    find_and_link_disconnected_nodes,
 )
 
 from .utils import (
@@ -330,6 +331,14 @@ class PathRAG:
 
             await self.full_docs.upsert(new_docs)
             await self.text_chunks.upsert(inserting_chunks)
+
+            # Automatically link isolated nodes during ingestion
+            await find_and_link_disconnected_nodes(
+                self.chunk_entity_relation_graph,
+                self.text_chunks,
+                self.to_global_config(),
+                self.relationships_vdb,
+            )
         finally:
             if update_storage:
                 await self._insert_done()
@@ -511,6 +520,103 @@ class PathRAG:
             tasks.append(cast(StorageNameSpace, storage_inst).index_done_callback())
         await asyncio.gather(*tasks)
 
+    def delete_document(self, doc_id: str):
+        loop = always_get_an_event_loop()
+        return loop.run_until_complete(self.adelete_document(doc_id))
+
+    async def adelete_document(self, doc_id: str):
+        from .prompt import GRAPH_FIELD_SEP
+
+        chunks_to_delete = []
+        if hasattr(self.text_chunks, "_data"):
+            for chunk_id, chunk_data in self.text_chunks._data.items():
+                if chunk_data.get("full_doc_id") == doc_id:
+                    chunks_to_delete.append(chunk_id)
+        else:
+            all_keys = await self.text_chunks.all_keys()
+            for chunk_id in all_keys:
+                chunk_data = await self.text_chunks.get_by_id(chunk_id)
+                if chunk_data and chunk_data.get("full_doc_id") == doc_id:
+                    chunks_to_delete.append(chunk_id)
+
+        if not chunks_to_delete:
+            logger.warning(f"No chunks found for doc {doc_id}")
+            await self.full_docs.delete([doc_id])
+            await self._insert_done()
+            return
+
+        logger.info(f"Deleting {len(chunks_to_delete)} chunks for doc {doc_id}")
+
+        nodes_to_fully_delete = []
+        edges_to_fully_delete = []
+        nodes_to_update = []
+        edges_to_update = []
+
+        if hasattr(self.chunk_entity_relation_graph, "_graph"):
+            graph = self.chunk_entity_relation_graph._graph
+            for node, data in list(graph.nodes(data=True)):
+                source_ids = data.get("source_id", "").split(GRAPH_FIELD_SEP)
+                new_source_ids = [
+                    sid for sid in source_ids if sid not in chunks_to_delete
+                ]
+
+                if not new_source_ids:
+                    nodes_to_fully_delete.append(node)
+                elif len(new_source_ids) < len(source_ids):
+                    nodes_to_update.append((node, GRAPH_FIELD_SEP.join(new_source_ids)))
+
+            for u, v, data in list(graph.edges(data=True)):
+                source_ids = data.get("source_id", "").split(GRAPH_FIELD_SEP)
+                new_source_ids = [
+                    sid for sid in source_ids if sid not in chunks_to_delete
+                ]
+
+                if not new_source_ids:
+                    edges_to_fully_delete.append((u, v))
+                elif len(new_source_ids) < len(source_ids):
+                    edges_to_update.append((u, v, GRAPH_FIELD_SEP.join(new_source_ids)))
+
+        if nodes_to_fully_delete:
+            entity_vdb_ids = [
+                compute_mdhash_id(node, prefix="ent-") for node in nodes_to_fully_delete
+            ]
+            await self.entities_vdb.delete(entity_vdb_ids)
+            for node in nodes_to_fully_delete:
+                await self.chunk_entity_relation_graph.delete_node(node)
+
+        if edges_to_fully_delete:
+            rel_vdb_ids = [
+                compute_mdhash_id(u + v, prefix="rel-")
+                for u, v in edges_to_fully_delete
+            ]
+            await self.relationships_vdb.delete(rel_vdb_ids)
+            if hasattr(self.chunk_entity_relation_graph, "_graph"):
+                graph = self.chunk_entity_relation_graph._graph
+                for u, v in edges_to_fully_delete:
+                    if graph.has_edge(u, v):
+                        graph.remove_edge(u, v)
+
+        for node, new_sid in nodes_to_update:
+            if hasattr(self.chunk_entity_relation_graph, "_graph"):
+                self.chunk_entity_relation_graph._graph.nodes[node]["source_id"] = (
+                    new_sid
+                )
+
+        for u, v, new_sid in edges_to_update:
+            if hasattr(self.chunk_entity_relation_graph, "_graph"):
+                if self.chunk_entity_relation_graph._graph.has_edge(u, v):
+                    self.chunk_entity_relation_graph._graph[u][v]["source_id"] = new_sid
+
+        await self.chunks_vdb.delete(chunks_to_delete)
+        await self.text_chunks.delete(chunks_to_delete)
+        await self.full_docs.delete([doc_id])
+
+        logger.info(
+            f"Deleted doc {doc_id}: {len(chunks_to_delete)} chunks, {len(nodes_to_fully_delete)} nodes deleted, {len(edges_to_fully_delete)} edges deleted."
+        )
+
+        await self._insert_done()
+
     def delete_by_entity(self, entity_name: str):
         loop = always_get_an_event_loop()
         return loop.run_until_complete(self.adelete_by_entity(entity_name))
@@ -541,3 +647,31 @@ class PathRAG:
                 continue
             tasks.append(cast(StorageNameSpace, storage_inst).index_done_callback())
         await asyncio.gather(*tasks)
+
+    def retry_isolated_nodes(self):
+        loop = always_get_an_event_loop()
+        return loop.run_until_complete(self.aretry_isolated_nodes())
+
+    async def aretry_isolated_nodes(self):
+        await find_and_link_disconnected_nodes(
+            self.chunk_entity_relation_graph,
+            self.text_chunks,
+            self.to_global_config(),
+            self.relationships_vdb,
+        )
+        await self._insert_done()
+
+    def retry_linking(self):
+        loop = always_get_an_event_loop()
+        return loop.run_until_complete(self.aretry_linking())
+
+    async def aretry_linking(self):
+        from .operate import find_and_link_disconnected_nodes
+
+        await find_and_link_disconnected_nodes(
+            self.chunk_entity_relation_graph,
+            self.text_chunks,
+            self.to_global_config(),
+            self.relationships_vdb,
+        )
+        await self._insert_done()
