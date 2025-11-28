@@ -22,6 +22,7 @@ Use {language} as output language.
 Format each entity as ("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>)
 
 2. From the entities identified in step 1, identify all pairs of (source_entity, target_entity) that are *clearly related* to each other.
+If an entity's description refers to another entity, you should treat them as related.
 For each pair of related entities, extract the following information:
 - source_entity: name of the source entity, as identified in step 1
 - target_entity: name of the target entity, as identified in step 1
@@ -149,6 +150,28 @@ PROMPTS[
 PROMPTS[
     "entiti_if_loop_extraction"
 ] = """It appears some entities may have still been missed.  Answer YES | NO if there are still entities that need to be added.
+"""
+
+PROMPTS["disconnected_entity_connection"] = """-Goal-
+Given an entity that was found in a text but has no connections, analyze the entity's description and the source text to identify relationships with other entities.
+
+-Input-
+Entity Name: {entity_name}
+Entity Description: {entity_description}
+Source Text: {input_text}
+
+-Instructions-
+1. Identify any other entities in the source text that are related to '{entity_name}'.
+2. If found, extract the relationship information.
+3. Use {language} as output language.
+4. Format each relationship as ("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)
+5. Only output the relationships in the specified format. Do not output the entity itself or content keywords.
+6. If no relationships are found, output nothing.
+7. When finished, output {completion_delimiter}
+
+-Example Output-
+("relationship"{tuple_delimiter}"Entity A"{tuple_delimiter}"Entity B"{tuple_delimiter}"Description of relationship"{tuple_delimiter}"keyword1, keyword2"{tuple_delimiter}8){record_delimiter}
+{completion_delimiter}
 """
 
 PROMPTS["fail_response"] = "Sorry, I'm not able to provide an answer to that question."
@@ -283,4 +306,21 @@ Similarity score criteria:
 1: Identical and answer can be directly reused
 0.5: Partially related and answer needs modification to be used
 Return only a number between 0-1, without any additional content.
+"""
+
+PROMPTS["retry_relationship_extraction"] = """-Goal-
+We identified an entity '{entity_name}' (Type: {entity_type}) with description: "{entity_description}".
+However, we could not find any relationships connecting this entity to others in the text.
+Please analyze the text below and identify relationships specifically involving '{entity_name}'.
+Look for connections to other entities (People, Organizations, Concepts, etc.) mentioned in the text.
+Use {language} as output language.
+
+-Text-
+{input_text}
+
+-Output Format-
+Return relationships in the following format (one per line):
+("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)
+
+If you really cannot find any relationships for '{entity_name}', output: NO_RELATIONSHIPS_FOUND
 """
