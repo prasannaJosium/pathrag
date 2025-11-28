@@ -49,6 +49,31 @@ PathRAG combines multiple search strategies:
    - The LLM generates responses grounded in this structured knowledge
    - Responses include information from across the knowledge graph
 
+### Ingestion Pipeline Architecture
+
+The ingestion process transforms raw text into a structured knowledge graph through a multi-stage pipeline that balances parallelism for speed with sequential consistency for data integrity:
+
+1.  **Parallel Extraction (Async)**:
+    - Text is split into chunks.
+    - Chunks are processed in **parallel** using `asyncio`.
+    - For each chunk, the LLM extracts entities and relationships simultaneously.
+    - Results are gathered in memory (`maybe_nodes` and `maybe_edges`).
+
+2.  **Sequential Insertion Phase**:
+    Once extraction is complete for all chunks, insertion happens in strict order:
+    
+    a.  **Entity (Node) Insertion**:
+        - Starts only after extraction finishes.
+        - Unique entities are inserted in **parallel batches**.
+        - Merges duplicate entities from different chunks.
+    
+    b.  **Relationship (Edge) Insertion**:
+        - Starts strictly **after** all nodes are successfully inserted.
+        - Edges are inserted in **parallel batches**.
+        - Includes a safety check to create "UNKNOWN" nodes if an edge references a missing entity.
+
+This "Parallel Extraction -> Gather -> Parallel Nodes -> Parallel Edges" flow ensures that no edge is ever created before its connecting nodes exist, preventing graph inconsistency.
+
 ## Features
 
 ### Core Functionality

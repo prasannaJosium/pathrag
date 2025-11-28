@@ -1,8 +1,8 @@
 import React from 'react';
-import { Table, Panel } from 'rsuite';
+import { Table, Panel, Button } from 'rsuite';
 const { Column, HeaderCell, Cell } = Table;
 
-const DocumentList = ({ documents, loading }) => {
+const DocumentList = ({ documents, loading, onDelete }) => {
   // Format file size
   const formatFileSize = (bytes) => {
     if (bytes === 0) return '0 Bytes';
@@ -83,6 +83,22 @@ const DocumentList = ({ documents, loading }) => {
                 </div>
               );
             }}
+          </Cell>
+        </Column>
+
+        <Column flexGrow={1} fixed="right" align="center">
+          <HeaderCell>Action</HeaderCell>
+          <Cell>
+            {rowData => (
+              <Button 
+                appearance="link" 
+                color="red" 
+                onClick={() => onDelete && onDelete(rowData.id)}
+                size="xs"
+              >
+                Delete
+              </Button>
+            )}
           </Cell>
         </Column>
       </Table>
